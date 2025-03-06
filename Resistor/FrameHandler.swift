@@ -59,15 +59,13 @@ class FrameHandler: NSObject, ObservableObject {
         guard let cgImage = frame else { return }
 
         let width = cgImage.width
+        let height = cgImage.height
 
-        // The Y position for the black line center from the ContentView
-        // This value is set to the center of the screen (rectangleY)
-        let rectangleHeight: CGFloat = 10
-        let rectangleY = UIScreen.main.bounds.height / 2 - rectangleHeight / 2
-        let rectangleYInt = Int(rectangleY)
+        // The Y position for the middle row of the screen
+        let middleY = height / 2
 
-        // Define the region: scan the entire row at the rectangleY position (where the black line is)
-        let region = CGRect(x: 0, y: rectangleYInt, width: width, height: 1)
+        // Define the region: scan the entire row at the middleY position
+        let region = CGRect(x: 0, y: middleY, width: width, height: 1)
 
         // Convert the CGImage to a CIImage
         let ciImage = CIImage(cgImage: cgImage)
@@ -96,15 +94,18 @@ class FrameHandler: NSObject, ObservableObject {
             let b = data[offset + 2]
             let a = data[offset + 3]
 
+            // Convert RGBA to HSV
+            let (h, s, v, _) = rgbaToHsv(r: r, g: g, b: b, a: a)
+
             // If this pixel color is different from the last one and is not similar, print it
             if let lastColor = lastColor {
                 if !isColorSimilar(lastColor, (r, g, b, a), tolerance: tolerance) {
-                    // Print the new color
-                    print("Pixel at (\(x), \(rectangleYInt)): R: \(r), G: \(g), B: \(b), A: \(a)")
+                    // Print the new color in HSV
+                    print("Pixel at (\(x), \(middleY)): H: \(h), S: \(s), V: \(v)")
                 }
             } else {
-                // Print the very first color
-                print("Pixel at (\(x), \(rectangleYInt)): R: \(r), G: \(g), B: \(b), A: \(a)")
+                // Print the very first color in HSV
+                print("Pixel at (\(x), \(middleY)): H: \(h), S: \(s), V: \(v)")
             }
 
             // Store the current color for comparison with the next pixel
@@ -121,6 +122,44 @@ class FrameHandler: NSObject, ObservableObject {
 
         // Check if the difference in each color component is within the allowed tolerance
         return rDiff <= Int(tolerance) && gDiff <= Int(tolerance) && bDiff <= Int(tolerance)
+    }
+
+    func rgbaToHsv(r: UInt8, g: UInt8, b: UInt8, a: UInt8) -> (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat) {
+        let rf = CGFloat(r) / 255.0
+        let gf = CGFloat(g) / 255.0
+        let bf = CGFloat(b) / 255.0
+        let af = CGFloat(a) / 255.0
+
+        let maxVal = max(rf, gf, bf)
+        let minVal = min(rf, gf, bf)
+        let delta = maxVal - minVal
+
+        var h: CGFloat = 0
+        var s: CGFloat = 0
+        let v: CGFloat = maxVal
+
+        if maxVal != 0 {
+            s = delta / maxVal
+        } else {
+            s = 0
+            h = 0
+            return (h, s, v, af)
+        }
+
+        if rf == maxVal {
+            h = (gf - bf) / delta
+        } else if gf == maxVal {
+            h = 2 + (bf - rf) / delta
+        } else {
+            h = 4 + (rf - gf) / delta
+        }
+
+        h *= 60
+        if h < 0 {
+            h += 360
+        }
+
+        return (h, s, v, af)
     }
 }
 
