@@ -28,7 +28,14 @@ struct ContentView: View {
                 .frame(width: 296, height: 10)
                 .foregroundColor(.black.opacity(0.5))
                 .position(x: UIScreen.main.bounds.width / 2, y: UIScreen.main.bounds.height / 2)
-            
+            Rectangle()
+                .frame(width:10, height: 10)
+                .foregroundColor(.red)
+                .position(x: 48.5,y:426)
+            Rectangle()
+                .frame(width:10, height: 10)
+                .foregroundColor(.red)
+                .position(x: 344.5,y:426)
             // Button to scan the colors
             VStack {
                 Spacer()

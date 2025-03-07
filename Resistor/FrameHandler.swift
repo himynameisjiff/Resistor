@@ -61,67 +61,72 @@ class FrameHandler: NSObject, ObservableObject {
         let width = cgImage.width
         let height = cgImage.height
 
-        // The Y position for the middle row of the screen
-        let middleY = height / 2
+        // Define the specific region from (48,426) to (345,426)
+        let startX = 48
+        let endX = 345
+        let scanWidth = endX - startX
+        let scanY = 426
 
-        // Define the region: scan the entire row at the middleY position
-        let region = CGRect(x: 0, y: middleY, width: width, height: 1)
+        // Ensure the scan area is within the image bounds
+        guard startX >= 0, scanWidth > 0, scanY >= 0, scanY < height, endX <= width else { return }
 
-        // Convert the CGImage to a CIImage
-        let ciImage = CIImage(cgImage: cgImage)
+        let region = CGRect(x: startX, y: scanY, width: scanWidth, height: 1)
 
-        // Extract pixel data from the defined region
-        guard let cgImageRegion = context.createCGImage(ciImage, from: region) else { return }
+        // Convert CGImage to CIImage and apply filters
+        let ciImage = CIImage(cgImage: cgImage).applyingFilter("CIColorControls", parameters: [
+            kCIInputBrightnessKey: 0.2,  // Increase brightness slightly
+            kCIInputContrastKey: 1.5,    // Enhance contrast
+            kCIInputSaturationKey: 2.0   // Increase saturation (adjust as needed)
+        ])
 
-        // Create a bitmap context to read pixel data
+        let ciContext = CIContext()
+        guard let cgImageRegion = ciContext.createCGImage(ciImage, from: region) else { return }
+
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerRow = cgImageRegion.width * 4 // 4 bytes per pixel (RGBA)
-        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: cgImageRegion.width * bytesPerRow)
-        guard let context = CGContext(data: data, width: cgImageRegion.width, height: cgImageRegion.height,
-                                      bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        let bytesPerPixel = 4
+        let bytesPerRow = cgImageRegion.width * bytesPerPixel
+        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: cgImageRegion.width * bytesPerPixel)
 
-        context.draw(cgImageRegion, in: CGRect(x: 0, y: 0, width: cgImageRegion.width, height: cgImageRegion.height))
+        defer { data.deallocate() } // Ensure memory is freed
 
-        var lastColor: (r: UInt8, g: UInt8, b: UInt8, a: UInt8)? = nil
-        let tolerance: UInt8 = 10 // Define an acceptable range of color difference
+        guard let bitmapContext = CGContext(data: data, width: cgImageRegion.width, height: cgImageRegion.height,
+                                            bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace,
+                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
 
-        // Loop through the pixels (this time we only scan one row)
-        for x in stride(from: 0, to: cgImageRegion.width, by: 1) {
-            let offset = x * 4
+        bitmapContext.draw(cgImageRegion, in: CGRect(x: 0, y: 0, width: cgImageRegion.width, height: cgImageRegion.height))
+
+        var lastColor: (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat)? = nil
+        let tolerance: CGFloat = 5
+
+        for x in 0..<cgImageRegion.width {
+            let offset = x * bytesPerPixel
             let r = data[offset]
             let g = data[offset + 1]
             let b = data[offset + 2]
             let a = data[offset + 3]
 
-            // Convert RGBA to HSV
-            let (h, s, v, _) = rgbaToHsv(r: r, g: g, b: b, a: a)
+            let hsv = rgbaToHsv(r: r, g: g, b: b, a: a)
 
-            // If this pixel color is different from the last one and is not similar, print it
             if let lastColor = lastColor {
-                if !isColorSimilar(lastColor, (r, g, b, a), tolerance: tolerance) {
-                    // Print the new color in HSV
-                    print("Pixel at (\(x), \(middleY)): H: \(h), S: \(s), V: \(v)")
+                if !isColorSimilar(lastColor, hsv, tolerance: tolerance) {
+                    print("Pixel at (\(startX + x), \(scanY)): H: \(hsv.h), S: \(hsv.s), V: \(hsv.v)")
+                    print("R: \(r), G: \(g), B: \(b)")
                 }
             } else {
-                // Print the very first color in HSV
-                print("Pixel at (\(x), \(middleY)): H: \(h), S: \(s), V: \(v)")
+                print("Pixel at (\(startX + x), \(scanY)): H: \(hsv.h), S: \(hsv.s), V: \(hsv.v)")
+                print("R: \(r), G: \(g), B: \(b)")
             }
 
-            // Store the current color for comparison with the next pixel
-            lastColor = (r, g, b, a)
+            lastColor = hsv
         }
-
-        data.deallocate()
     }
+
     
-    func isColorSimilar(_ color1: (r: UInt8, g: UInt8, b: UInt8, a: UInt8), _ color2: (r: UInt8, g: UInt8, b: UInt8, a: UInt8), tolerance: UInt8 = 10) -> Bool {
-        let rDiff = abs(Int(color1.r) - Int(color2.r))
-        let gDiff = abs(Int(color1.g) - Int(color2.g))
-        let bDiff = abs(Int(color1.b) - Int(color2.b))
+    func isColorSimilar(_ color1: (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat), _ color2: (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat), tolerance: CGFloat = 1) -> Bool {
+        let rDiff = min(abs(color1.h - color2.h), 360 - abs(color1.h - color2.h))
 
         // Check if the difference in each color component is within the allowed tolerance
-        return rDiff <= Int(tolerance) && gDiff <= Int(tolerance) && bDiff <= Int(tolerance)
+        return rDiff <= tolerance
     }
 
     func rgbaToHsv(r: UInt8, g: UInt8, b: UInt8, a: UInt8) -> (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat) {
@@ -134,29 +139,26 @@ class FrameHandler: NSObject, ObservableObject {
         let minVal = min(rf, gf, bf)
         let delta = maxVal - minVal
 
-        var h: CGFloat = 0
-        var s: CGFloat = 0
-        let v: CGFloat = maxVal
+        var h: CGFloat = -1
+        var s: CGFloat = -1
+        let v: CGFloat = maxVal*100
+
+        if (maxVal==minVal) {
+            h = 0;
+        }
+        else if rf == maxVal {
+            h = fmod(60 * ((gf-bf) / delta) + 360, 360)
+        } else if gf == maxVal {
+            h = fmod(60 * ((bf - rf) / delta) + 120, 360)
+        } else {
+            h = fmod(60 * ((rf - gf) / delta) + 240, 360);
+        }
 
         if maxVal != 0 {
-            s = delta / maxVal
+            s = (delta / maxVal) * 100
         } else {
             s = 0
-            h = 0
             return (h, s, v, af)
-        }
-
-        if rf == maxVal {
-            h = (gf - bf) / delta
-        } else if gf == maxVal {
-            h = 2 + (bf - rf) / delta
-        } else {
-            h = 4 + (rf - gf) / delta
-        }
-
-        h *= 60
-        if h < 0 {
-            h += 360
         }
 
         return (h, s, v, af)
