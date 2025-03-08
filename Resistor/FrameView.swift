@@ -18,7 +18,6 @@ struct FrameView: View {
             } else {
                 Color.black
             }
-
         }
     }
 }

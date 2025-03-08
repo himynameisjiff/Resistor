@@ -4,12 +4,16 @@
 //
 //  Created by Prahalad on 2/11/25.
 //
+
 import AVFoundation
 import CoreImage
 import Foundation
 import UIKit
+
 class FrameHandler: NSObject, ObservableObject {
     @Published var frame: CGImage?
+    @Published var scannedRow: CGImage?
+    
     private var permissionGranted = false
     private let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "sessionQueue")
@@ -18,8 +22,8 @@ class FrameHandler: NSObject, ObservableObject {
     override init() {
         super.init()
         checkPermission()
-        sessionQueue.async {
-            [unowned self] in self.setupCaptureSession()
+        sessionQueue.async { [unowned self] in
+            self.setupCaptureSession()
             self.captureSession.startRunning()
         }
     }
@@ -55,6 +59,7 @@ class FrameHandler: NSObject, ObservableObject {
         videoOutput.connection(with: .video)?.videoRotationAngle = 90
     }
 
+    /// Extracts a row region from the captured frame and publishes it via `scannedRow`.
     func extractColors() {
         guard let cgImage = frame else { return }
 
@@ -72,96 +77,23 @@ class FrameHandler: NSObject, ObservableObject {
 
         let region = CGRect(x: startX, y: scanY, width: scanWidth, height: 1)
 
-        // Convert CGImage to CIImage and apply filters
+        // Convert CGImage to CIImage and apply color controls filter
         let ciImage = CIImage(cgImage: cgImage).applyingFilter("CIColorControls", parameters: [
             kCIInputBrightnessKey: 0.2,  // Increase brightness slightly
             kCIInputContrastKey: 1.5,    // Enhance contrast
-            kCIInputSaturationKey: 2.0   // Increase saturation (adjust as needed)
+            kCIInputSaturationKey: 2.0   // Increase saturation
         ])
-
+        let transform = CGAffineTransform(rotationAngle: .pi/2)
+        let rotatedImage = ciImage.transformed(by: transform)
+        
         let ciContext = CIContext()
-        guard let cgImageRegion = ciContext.createCGImage(ciImage, from: region) else { return }
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bytesPerPixel = 4
-        let bytesPerRow = cgImageRegion.width * bytesPerPixel
-        let data = UnsafeMutablePointer<UInt8>.allocate(capacity: cgImageRegion.width * bytesPerPixel)
-
-        defer { data.deallocate() } // Ensure memory is freed
-
-        guard let bitmapContext = CGContext(data: data, width: cgImageRegion.width, height: cgImageRegion.height,
-                                            bitsPerComponent: 8, bytesPerRow: bytesPerRow, space: colorSpace,
-                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
-
-        bitmapContext.draw(cgImageRegion, in: CGRect(x: 0, y: 0, width: cgImageRegion.width, height: cgImageRegion.height))
-
-        var lastColor: (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat)? = nil
-        let tolerance: CGFloat = 5
-
-        for x in 0..<cgImageRegion.width {
-            let offset = x * bytesPerPixel
-            let r = data[offset]
-            let g = data[offset + 1]
-            let b = data[offset + 2]
-            let a = data[offset + 3]
-
-            let hsv = rgbaToHsv(r: r, g: g, b: b, a: a)
-
-            if let lastColor = lastColor {
-                if !isColorSimilar(lastColor, hsv, tolerance: tolerance) {
-                    print("Pixel at (\(startX + x), \(scanY)): H: \(hsv.h), S: \(hsv.s), V: \(hsv.v)")
-                    print("R: \(r), G: \(g), B: \(b)")
-                }
-            } else {
-                print("Pixel at (\(startX + x), \(scanY)): H: \(hsv.h), S: \(hsv.s), V: \(hsv.v)")
-                print("R: \(r), G: \(g), B: \(b)")
-            }
-
-            lastColor = hsv
+        let newExtenet = rotatedImage.extent
+        guard let cgImageRegion = ciContext.createCGImage(rotatedImage, from: newExtenet) else { return }
+        
+        // Publish the extracted row on the main thread
+        DispatchQueue.main.async {
+            self.scannedRow = cgImageRegion
         }
-    }
-
-    
-    func isColorSimilar(_ color1: (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat), _ color2: (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat), tolerance: CGFloat = 1) -> Bool {
-        let rDiff = min(abs(color1.h - color2.h), 360 - abs(color1.h - color2.h))
-
-        // Check if the difference in each color component is within the allowed tolerance
-        return rDiff <= tolerance
-    }
-
-    func rgbaToHsv(r: UInt8, g: UInt8, b: UInt8, a: UInt8) -> (h: CGFloat, s: CGFloat, v: CGFloat, a: CGFloat) {
-        let rf = CGFloat(r) / 255.0
-        let gf = CGFloat(g) / 255.0
-        let bf = CGFloat(b) / 255.0
-        let af = CGFloat(a) / 255.0
-
-        let maxVal = max(rf, gf, bf)
-        let minVal = min(rf, gf, bf)
-        let delta = maxVal - minVal
-
-        var h: CGFloat = -1
-        var s: CGFloat = -1
-        let v: CGFloat = maxVal*100
-
-        if (maxVal==minVal) {
-            h = 0;
-        }
-        else if rf == maxVal {
-            h = fmod(60 * ((gf-bf) / delta) + 360, 360)
-        } else if gf == maxVal {
-            h = fmod(60 * ((bf - rf) / delta) + 120, 360)
-        } else {
-            h = fmod(60 * ((rf - gf) / delta) + 240, 360);
-        }
-
-        if maxVal != 0 {
-            s = (delta / maxVal) * 100
-        } else {
-            s = 0
-            return (h, s, v, af)
-        }
-
-        return (h, s, v, af)
     }
 }
 
