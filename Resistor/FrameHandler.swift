@@ -59,40 +59,68 @@ class FrameHandler: NSObject, ObservableObject {
         videoOutput.connection(with: .video)?.videoRotationAngle = 90
     }
 
-    /// Extracts a row region from the captured frame and publishes it via `scannedRow`.
+    /// Extracts the region corresponding to the displayed scanning rectangle in FrameView,
+    /// then further crops it so that only 25% to 75% of the row is shown.
+    ///
+    /// The FrameView displays the camera image scaled to 300×200.
+    /// The scanning rectangle is drawn with size 296×10 and centered in the view.
+    /// This function computes the equivalent region in the full resolution image,
+    /// then crops the resulting row to the central 50% of its width.
     func extractColors() {
         guard let cgImage = frame else { return }
-
-        let width = cgImage.width
-        let height = cgImage.height
-
-        // Define the specific region from (48,426) to (345,426)
-        let startX = 48
-        let endX = 345
-        let scanWidth = endX - startX
-        let scanY = 426
-
-        // Ensure the scan area is within the image bounds
-        guard startX >= 0, scanWidth > 0, scanY >= 0, scanY < height, endX <= width else { return }
-
-        let region = CGRect(x: startX, y: scanY, width: scanWidth, height: 1)
-
-        // Convert CGImage to CIImage and apply color controls filter
-        let ciImage = CIImage(cgImage: cgImage).applyingFilter("CIColorControls", parameters: [
-            kCIInputBrightnessKey: 0.2,  // Increase brightness slightly
-            kCIInputContrastKey: 1.5,    // Enhance contrast
-            kCIInputSaturationKey: 2.0   // Increase saturation
+        
+        // Get the full image dimensions.
+        let imageWidth = CGFloat(cgImage.width)
+        let imageHeight = CGFloat(cgImage.height)
+        
+        // FrameView dimensions.
+        let frameViewWidth: CGFloat = 300
+        let frameViewHeight: CGFloat = 200
+        
+        // Compute scaling factors between the full image and the FrameView dimensions.
+        let scaleX = imageWidth / frameViewWidth
+        let scaleY = imageHeight / frameViewHeight
+        
+        // Scanning rectangle dimensions in FrameView.
+        let scanningRectWidth: CGFloat = 296
+        let scanningRectHeight: CGFloat = 10
+        let rectOriginX: CGFloat = (frameViewWidth - scanningRectWidth) / 2
+        let rectOriginY: CGFloat = (frameViewHeight - scanningRectHeight) / 2
+        
+        // Convert the scanning rectangle to the full image coordinate space.
+        let imageRectOriginX = rectOriginX * scaleX
+        let imageRectOriginY = rectOriginY * scaleY
+        let imageRectWidth = scanningRectWidth * scaleX
+        let imageRectHeight = scanningRectHeight * scaleY
+        
+        let cropRect = CGRect(x: imageRectOriginX, y: imageRectOriginY, width: imageRectWidth, height: imageRectHeight)
+        
+        // Create a CIImage and crop it to the scanning rectangle.
+        let ciImage = CIImage(cgImage: cgImage)
+        let croppedCIImage = ciImage.cropped(to: cropRect)
+        
+        // Further crop the extracted row: show only from 25% to 75% of the row width.
+        let furtherCropOriginX = croppedCIImage.extent.origin.x + croppedCIImage.extent.width * 0.25
+        let furtherCropWidth = croppedCIImage.extent.width * 0.5
+        let furtherCropRect = CGRect(x: furtherCropOriginX,
+                                     y: croppedCIImage.extent.origin.y,
+                                     width: furtherCropWidth,
+                                     height: croppedCIImage.extent.height)
+        let finalCIImage = croppedCIImage.cropped(to: furtherCropRect)
+        
+        // Apply a color controls filter to the final cropped image.
+        let filteredCIImage = finalCIImage.applyingFilter("CIColorControls", parameters: [
+            kCIInputBrightnessKey: 0.2,  // Slight brightness increase
+            //kCIInputContrastKey: 1.5,    // Enhanced contrast
+            kCIInputSaturationKey: 2.0   // Increased saturation
         ])
-        let transform = CGAffineTransform(rotationAngle: .pi/2)
-        let rotatedImage = ciImage.transformed(by: transform)
         
-        let ciContext = CIContext()
-        let newExtenet = rotatedImage.extent
-        guard let cgImageRegion = ciContext.createCGImage(rotatedImage, from: newExtenet) else { return }
+        // Create a new CGImage from the filtered CIImage.
+        guard let newCGImage = context.createCGImage(filteredCIImage, from: filteredCIImage.extent) else { return }
         
-        // Publish the extracted row on the main thread
+        // Publish the scanned row on the main thread.
         DispatchQueue.main.async {
-            self.scannedRow = cgImageRegion
+            self.scannedRow = newCGImage
         }
     }
 }
