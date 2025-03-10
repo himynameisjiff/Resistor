@@ -13,7 +13,7 @@ import UIKit
 class FrameHandler: NSObject, ObservableObject {
     @Published var frame: CGImage?
     @Published var scannedRow: CGImage?
-    
+    @Published var array: [String]?
     private var permissionGranted = false
     private let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "sessionQueue")
@@ -175,6 +175,7 @@ class FrameHandler: NSObject, ObservableObject {
         }
         
         // Print the ordered list of unique color names.
+        self.array = colorNames
         print("Ordered Unique Colors Detected:")
         print(colorNames)
     }
@@ -185,9 +186,9 @@ class FrameHandler: NSObject, ObservableObject {
         if hsv.s <= 10 {
             if hsv.v >= 80 {
                 return "White"
-            } else if hsv.v >= 30 && hsv.v < 80 {
-                return "Gray"
-            }
+            } //else if hsv.v >= 30 && hsv.v < 70 {
+            //    return "Gray"
+            //}
         }
         
         // Check for black (very low brightness)
