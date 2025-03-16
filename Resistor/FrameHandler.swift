@@ -9,15 +9,17 @@ import AVFoundation
 import CoreImage
 import Foundation
 import UIKit
-
+import CoreML
 class FrameHandler: NSObject, ObservableObject {
     @Published var frame: CGImage?
     @Published var scannedRow: CGImage?
     @Published var array: [String]?
+    @Published var edgePositions: [Int] = []
     private var permissionGranted = false
     private let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "sessionQueue")
     private let context = CIContext()
+    private let edgeDetector = EdgeDetector()
 
     override init() {
         super.init()
@@ -130,8 +132,19 @@ class FrameHandler: NSObject, ObservableObject {
         }
 
         detectColors(in: newCGImage)
+        detectEdges(on: newCGImage)
+        print(self.edgePositions)
     }
     
+    func detectEdges(on cgImage: CGImage) {
+        let uiImage = UIImage(cgImage: cgImage)
+        if let edgePositions = edgeDetector.detectVerticalEdges(in: uiImage) {
+            DispatchQueue.main.async {
+                self.edgePositions = edgePositions
+                print("Detected Edge Positions:", edgePositions)
+            }
+        }
+    }
     /// Detects colors from the provided CGImage and prints the unique color names in order,
     /// adding a new color only when it is different than the previous one.
     func detectColors(in cgImage: CGImage) {
@@ -262,6 +275,52 @@ class FrameHandler: NSObject, ObservableObject {
         
         return (h, s, v, af)
     }
+    func getColors(in cimage: CGImage) -> String{
+        let label = ""
+        let imageClassifierWrapper = try? Resistor_Classifier_1(configuration: MLModelConfiguration())
+        if let colors = try? imageClassifierWrapper?.prediction(image: (cgImageToPixelBuffer(cimage))!){
+            let label = colors.target
+        }
+        return label
+    }
+            func cgImageToPixelBuffer(_ image: CGImage) -> CVPixelBuffer? {
+                let width = image.width
+                let height = image.height
+
+                let attrs: [CFString: Any] = [
+                    kCVPixelBufferCGImageCompatibilityKey: true,
+                    kCVPixelBufferCGBitmapContextCompatibilityKey: true
+                ]
+                
+                var pixelBuffer: CVPixelBuffer?
+                let status = CVPixelBufferCreate(kCFAllocatorDefault,
+                                                 width,
+                                                 height,
+                                                 kCVPixelFormatType_32ARGB, // Ensure the correct format
+                                                 attrs as CFDictionary,
+                                                 &pixelBuffer)
+                
+                guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
+                    return nil
+                }
+
+                CVPixelBufferLockBaseAddress(buffer, [])
+                guard let context = CGContext(data: CVPixelBufferGetBaseAddress(buffer),
+                                              width: width,
+                                              height: height,
+                                              bitsPerComponent: 8,
+                                              bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else {
+                    CVPixelBufferUnlockBaseAddress(buffer, [])
+                    return nil
+                }
+
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                CVPixelBufferUnlockBaseAddress(buffer, [])
+
+                return buffer
+            }
 }
 
 extension FrameHandler: AVCaptureVideoDataOutputSampleBufferDelegate {

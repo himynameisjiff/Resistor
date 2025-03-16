@@ -12,11 +12,19 @@ struct ContentView: View {
             VStack {
                 // Display the extracted row above the camera view
                 if let scannedRow = model.scannedRow {
-                    Image(scannedRow, scale: 1.0, orientation: .up, label: Text("Scanned Row"))
-                        .resizable()
-                        .frame(height: 30)  // Adjust height as needed
-                        .border(Color.white)
-                        .padding()
+                    ZStack{
+                        Image(scannedRow, scale: 1.0, orientation: .up, label: Text("Scanned Row"))
+                            .resizable()
+                            .frame(height: 30)  // Adjust height as needed
+                            .border(Color.white)
+                            .padding()
+                        ForEach(model.edgePositions, id: \.self) { position in
+                                                    Rectangle()
+                                                        .frame(width: 10, height: 30)
+                                                        .foregroundColor(.red)
+                                                        .position(x: CGFloat(position) * 0.6 + 30, y: 15) // Adjust scaling factor and position as needed
+                                                }
+                    }
                 } else {
                     Text("Scanned row will appear here")
                         .foregroundColor(.white)
